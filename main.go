@@ -107,6 +107,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	secureMetricsEndpoint := false
+	if os.Getenv("SECURE_METRICS_ENDPOINT") == "true" {
+		secureMetricsEndpoint = true
+	}
+
 	if err = (&lvcontroller.LocalVolumeReconciler{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("controllers").WithName("LocalVolume"),
@@ -117,9 +122,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&lvdcontroller.LocalVolumeDiscoveryReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("LocalVolumeDiscovery"),
-		Scheme: mgr.GetScheme(),
+		Client:                mgr.GetClient(),
+		Log:                   ctrl.Log.WithName("controllers").WithName("LocalVolumeDiscovery"),
+		Scheme:                mgr.GetScheme(),
+		SecureMetricsEndpoint: secureMetricsEndpoint,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "LocalVolumeDiscovery")
 		os.Exit(1)
@@ -135,9 +141,10 @@ func main() {
 	}
 
 	if err = (&nodedaemoncontroller.DaemonReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("NodeDaemon"),
-		Scheme: mgr.GetScheme(),
+		Client:                mgr.GetClient(),
+		Log:                   ctrl.Log.WithName("controllers").WithName("NodeDaemon"),
+		Scheme:                mgr.GetScheme(),
+		SecureMetricsEndpoint: secureMetricsEndpoint,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "NodeDaemon")
 		os.Exit(1)
