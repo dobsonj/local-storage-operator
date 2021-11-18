@@ -108,10 +108,10 @@ func (e *Exporter) enableServiceMonitor() error {
 		}
 		serviceMonitor.Spec.Endpoints[0].TLSConfig.ServerName = fmt.Sprintf("%s.%s.svc", e.Name, e.Namespace)
 		serviceMonitor.Spec.Endpoints[0].TLSConfig.CAFile = caFile
-	}
 
-	if _, err = e.createOrUpdateServiceMonitor(serviceMonitor); err != nil {
-		return fmt.Errorf("failed to enable service monitor. %v", err)
+		if _, err = e.createOrUpdateServiceMonitor(serviceMonitor); err != nil {
+			return fmt.Errorf("failed to enable service monitor. %v", err)
+		}
 	}
 
 	return nil

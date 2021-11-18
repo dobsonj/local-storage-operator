@@ -3,7 +3,8 @@ WORKDIR /go/src/github.com/openshift/local-storage-operator
 COPY . .
 RUN make build-operator
 
-FROM registry.ci.openshift.org/ocp/4.9:base
+#FROM registry.ci.openshift.org/ocp/4.9:base
+FROM centos:8
 COPY --from=builder /go/src/github.com/openshift/local-storage-operator/_output/bin/local-storage-operator /usr/bin/
 COPY config/manifests /manifests
 ENTRYPOINT ["/usr/bin/local-storage-operator"]

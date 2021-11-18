@@ -76,7 +76,7 @@ spec:
       serviceAccountName: local-storage-operator
       containers:
         - name: local-storage-operator
-          image: quay.io/openshift/origin-local-storage-operator
+          image: quay.io/jdobson/local-storage-operator:latest
           ports:
           - containerPort: 60000
             name: metrics
@@ -91,6 +91,6 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: DISKMAKER_IMAGE
-              value: quay.io/openshift/origin-local-storage-diskmaker
+              value: quay.io/jdobson/local-diskmaker:latest
             - name: KUBE_RBAC_PROXY_IMAGE
               value: quay.io/openshift/origin-kube-rbac-proxy:latest

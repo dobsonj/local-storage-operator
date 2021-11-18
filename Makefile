@@ -227,14 +227,14 @@ build-diskmaker:
 build-operator:
 	env GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) go build -mod=vendor -ldflags '-X main.version=$(REV)' -o $(TARGET_DIR)/local-storage-operator $(CURPATH)
 
-images: diskmaker-container operator-container must-gather
+images: diskmaker-container operator-container #must-gather
 
 push: images push-images
 
 push-images:
 	docker push ${DISKMAKER_IMAGE}
 	docker push ${OPERATOR_IMAGE}
-	docker push ${MUST_GATHER_IMAGE}
+	#docker push ${MUST_GATHER_IMAGE}
 
 must-gather:
 	docker build --no-cache -t $(MUST_GATHER_IMAGE) -f $(CURPATH)/Dockerfile.mustgather .
