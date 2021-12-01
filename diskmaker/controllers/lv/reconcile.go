@@ -12,19 +12,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	"github.com/openshift/local-storage-operator/common"
 	"github.com/openshift/local-storage-operator/internal"
 	"github.com/openshift/local-storage-operator/localmetrics"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog"
 	"k8s.io/utils/mount"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 	staticProvisioner "sigs.k8s.io/sig-storage-local-static-provisioner/pkg/common"
@@ -76,7 +75,6 @@ type DiskLocation struct {
 type LocalVolumeReconciler struct {
 	Client          client.Client
 	Scheme          *runtime.Scheme
-	Log             logr.Logger
 	symlinkLocation string
 	localVolume     *localv1.LocalVolume
 	eventSync       *eventReporter
@@ -94,6 +92,7 @@ func (r *LocalVolumeReconciler) createSymlink(
 	symLinkSource string,
 	symLinkTarget string,
 	idExists bool,
+	logger *log.DelegatingLogger,
 ) bool {
 	// get PV creation lock which checks for existing symlinks to this device
 	pvLock, pvLocked, existingSymlinks, err := internal.GetPVCreationLock(
@@ -104,7 +103,7 @@ func (r *LocalVolumeReconciler) createSymlink(
 	unlockFunc := func() {
 		err := pvLock.Unlock()
 		if err != nil {
-			r.Log.Error(err, " failed to unlock device")
+			logger.Error(err, " failed to unlock device")
 		}
 	}
 
@@ -118,13 +117,12 @@ func (r *LocalVolumeReconciler) createSymlink(
 		}
 		msg := fmt.Sprintf("not symlinking, already claimed: %v", existingSymlinks)
 		r.eventSync.Report(r.localVolume, newDiskEvent(DeviceSymlinkExists, msg, symLinkTarget, corev1.EventTypeWarning))
-		klog.Errorf(msg)
-		r.Log.Error(logError.New("not symlinking, already claimed"), "Symlink already exists.", "symlink", existingSymlinks)
+		logger.Error(logError.New("not symlinking, already claimed"), "Symlink already exists.", "symlink", existingSymlinks)
 		return false
 	} else if err != nil || !pvLocked { // locking failed for some other reasion
 		msg := fmt.Sprintf("not symlinking, locking failed: %+v", err)
 		r.eventSync.Report(r.localVolume, newDiskEvent(ErrorCreatingSymLink, msg, symLinkTarget, corev1.EventTypeWarning))
-		r.Log.Error(err, "not symlinking, could not get lock")
+		logger.Error(err, "not symlinking, could not get lock")
 		return false
 	}
 
@@ -134,12 +132,12 @@ func (r *LocalVolumeReconciler) createSymlink(
 	if err != nil {
 		msg := "error creating symlink dir "
 		r.eventSync.Report(r.localVolume, newDiskEvent(ErrorFindingMatchingDisk, msg, symLinkTarget, corev1.EventTypeWarning))
-		r.Log.Error(err, msg, "symLinkDir", symLinkDir)
+		logger.Error(err, msg, "symLinkDir", symLinkDir)
 		return false
 	}
 
 	if fileExists(symLinkTarget) {
-		r.Log.Info("symlink already exists", "symLink", symLinkTarget)
+		logger.Info("symlink already exists", "symLink", symLinkTarget)
 		return true
 	}
 
@@ -148,7 +146,7 @@ func (r *LocalVolumeReconciler) createSymlink(
 	if !idExists && r.checkForExistingPV(deviceNameLocation) {
 		msg := "error creating symlink, no disk/by-id found and found an existing PV for same device "
 		r.eventSync.Report(r.localVolume, newDiskEvent(ErrorFindingMatchingDisk, msg, symLinkSource, corev1.EventTypeWarning))
-		r.Log.Error(err, msg, "symLink", symLinkTarget)
+		logger.Error(err, msg, "symLink", symLinkTarget)
 		return false
 	}
 
@@ -156,14 +154,14 @@ func (r *LocalVolumeReconciler) createSymlink(
 	if err != nil {
 		msg := "error creating symlink "
 		r.eventSync.Report(r.localVolume, newDiskEvent(ErrorFindingMatchingDisk, msg, symLinkSource, corev1.EventTypeWarning))
-		r.Log.Error(err, msg, "symLink", symLinkTarget)
+		logger.Error(err, msg, "symLink", symLinkTarget)
 		return false
 	}
 
 	if !idExists {
 		msg := fmt.Sprintf("created symlink on device name %s with no disk/by-id. device name might not persist on reboot", symLinkSource)
 		r.eventSync.Report(r.localVolume, newDiskEvent(SymLinkedOnDeviceName, msg, symLinkSource, corev1.EventTypeWarning))
-		r.Log.Info("created symlink on device name with no disk/by-id. device name might not persist on reboot", "deviceName", symLinkSource)
+		logger.Info("created symlink on device name with no disk/by-id. device name might not persist on reboot", "deviceName", symLinkSource)
 	}
 	successMsg := fmt.Sprintf("found matching disk %s with id %s", deviceNameLocation.diskNamePath, deviceNameLocation.diskID)
 	r.eventSync.Report(r.localVolume, newDiskEvent(FoundMatchingDisk, successMsg, deviceNameLocation.diskNamePath, corev1.EventTypeNormal))
@@ -257,7 +255,7 @@ func addOwnerLabels(meta *metav1.ObjectMeta, cr *localv1.LocalVolume) bool {
 //+kubebuilder:rbac:groups="";storage.k8s.io,resources=configmaps;storageclasses;persistentvolumeclaims;persistentvolumes,verbs=*
 
 func (r *LocalVolumeReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	logger := r.Log.WithValues("request.namespace", request.Namespace, "Request.Name", request.Name)
+	logger := log.NewDelegatingLogger(log.FromContext(ctx))
 	logger.Info("Reconciling LocalVolume")
 
 	if !r.cacheSynced {
@@ -397,7 +395,7 @@ func (r *LocalVolumeReconciler) Reconcile(ctx context.Context, request ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 
-	deviceMap, err := r.findMatchingDisks(diskConfig, validBlockDevices, allDiskIds)
+	deviceMap, err := r.findMatchingDisks(diskConfig, validBlockDevices, allDiskIds, logger)
 	if err != nil {
 		msg := " error finding matching disks"
 		r.eventSync.Report(r.localVolume, newDiskEvent(ErrorFindingMatchingDisk, msg, "", corev1.EventTypeWarning))
@@ -442,14 +440,14 @@ func (r *LocalVolumeReconciler) Reconcile(ctx context.Context, request ctrl.Requ
 		symLinkDirPath := path.Join(r.symlinkLocation, storageClassName)
 		for _, deviceNameLocation := range deviceArray {
 			blockDeviceList = append(blockDeviceList, deviceNameLocation.blockDevice)
-			devLogger := logger.WithValues("Device.Name", deviceNameLocation.diskNamePath)
+			devLogger := log.NewDelegatingLogger(logger.WithValues("Device.Name", deviceNameLocation.diskNamePath))
 			source, target, idExists, err := common.GetSymLinkSourceAndTarget(deviceNameLocation.blockDevice, symLinkDirPath)
 			if err != nil {
 				logger.Error(err, "failed to get symlink source and target")
 				errors = append(errors, err)
 				break
 			}
-			shouldCreatePV := r.createSymlink(deviceNameLocation, source, target, idExists)
+			shouldCreatePV := r.createSymlink(deviceNameLocation, source, target, idExists, devLogger)
 			if shouldCreatePV {
 				storageClass := &storagev1.StorageClass{}
 				err := r.Client.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass)
@@ -506,7 +504,7 @@ func (r *LocalVolumeReconciler) Reconcile(ctx context.Context, request ctrl.Requ
 	return ctrl.Result{Requeue: true, RequeueAfter: checkDuration}, nil
 }
 
-func ignoreDevices(dev internal.BlockDevice, log logr.Logger) bool {
+func ignoreDevices(dev internal.BlockDevice, log *log.DelegatingLogger) bool {
 	if hasBindMounts, _, err := dev.HasBindMounts(); err != nil || hasBindMounts {
 		log.Info("ignoring mount device", "deviceName", dev.Name)
 		return true
@@ -520,7 +518,7 @@ func ignoreDevices(dev internal.BlockDevice, log logr.Logger) bool {
 	return false
 }
 
-func (r *LocalVolumeReconciler) findMatchingDisks(diskConfig *DiskConfig, blockDevices []internal.BlockDevice, allDiskIds []string) (map[string][]DiskLocation, error) {
+func (r *LocalVolumeReconciler) findMatchingDisks(diskConfig *DiskConfig, blockDevices []internal.BlockDevice, allDiskIds []string, logger *log.DelegatingLogger) (map[string][]DiskLocation, error) {
 
 	// blockDeviceMap is a map of storageclass and device locations
 	blockDeviceMap := make(map[string][]DiskLocation)
@@ -543,7 +541,7 @@ func (r *LocalVolumeReconciler) findMatchingDisks(diskConfig *DiskConfig, blockD
 				matchedDeviceID, err := r.findStableDeviceID(baseDeviceName, allDiskIds)
 				// This means no /dev/disk/by-id entry was created for requested device.
 				if err != nil {
-					r.Log.Error(err, " unable to find disk ID for local pool", "diskName", diskName)
+					logger.Error(err, " unable to find disk ID for local pool", "diskName", diskName)
 					addDiskToMap(storageClass, "", diskName, blockDevice)
 					continue
 				}
@@ -552,12 +550,12 @@ func (r *LocalVolumeReconciler) findMatchingDisks(diskConfig *DiskConfig, blockD
 			} else {
 				if !fileExists(diskName) {
 					msg := "no file exists for specified device "
-					r.Log.Info(msg, "diskName", diskName)
+					logger.Info(msg, "diskName", diskName)
 					continue
 				}
 				fileMode, err := os.Stat(diskName)
 				if err != nil {
-					r.Log.Error(err, "error attempting to examine ", "diskName", diskName)
+					logger.Error(err, "error attempting to examine ", "diskName", diskName)
 					continue
 				}
 				msg := ""
@@ -570,7 +568,7 @@ func (r *LocalVolumeReconciler) findMatchingDisks(diskConfig *DiskConfig, blockD
 					msg = fmt.Sprintf("unable to find matching disk %v", diskName)
 				}
 				r.eventSync.Report(r.localVolume, newDiskEvent(ErrorFindingMatchingDisk, msg, diskName, corev1.EventTypeWarning))
-				r.Log.Info(msg)
+				logger.Info(msg)
 			}
 		}
 
@@ -581,7 +579,7 @@ func (r *LocalVolumeReconciler) findMatchingDisks(diskConfig *DiskConfig, blockD
 			if err != nil {
 				msg := fmt.Sprintf("unable to add disk-id %s to local disk pool: %v", deviceID, err)
 				r.eventSync.Report(r.localVolume, newDiskEvent(ErrorFindingMatchingDisk, msg, deviceID, corev1.EventTypeWarning))
-				r.Log.Error(err, " unable to add disk-id to local disk pool", "Device-id", deviceID)
+				logger.Error(err, " unable to add disk-id to local disk pool", "Device-id", deviceID)
 				continue
 			}
 			baseDeviceName := filepath.Base(matchedDiskName)

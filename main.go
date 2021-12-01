@@ -77,7 +77,7 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 		ZapOpts:     []zaplog.Option{zaplog.AddCaller()},
 	}
 
@@ -109,7 +109,6 @@ func main() {
 
 	if err = (&lvcontroller.LocalVolumeReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("LocalVolume"),
 		LvMap:  &common.StorageClassOwnerMap{},
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
@@ -118,7 +117,6 @@ func main() {
 	}
 	if err = (&lvdcontroller.LocalVolumeDiscoveryReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("LocalVolumeDiscovery"),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "LocalVolumeDiscovery")
@@ -126,7 +124,6 @@ func main() {
 	}
 	if err = (&lvscontroller.LocalVolumeSetReconciler{
 		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("LocalVolumeSet"),
 		LvSetMap: &common.StorageClassOwnerMap{},
 		Scheme:   mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
@@ -136,7 +133,6 @@ func main() {
 
 	if err = (&nodedaemoncontroller.DaemonReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("NodeDaemon"),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "NodeDaemon")

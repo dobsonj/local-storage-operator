@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	v1 "github.com/openshift/local-storage-operator/api/v1"
 	localv1alpha1 "github.com/openshift/local-storage-operator/api/v1alpha1"
 	"github.com/openshift/local-storage-operator/common"
@@ -24,10 +23,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -40,15 +38,8 @@ const (
 	// DiskMakerName is the name of the diskmaker-manager daemonset
 	DiskMakerName = "diskmaker-manager"
 
-	controllerName = "localvolumesetdaemon-controller"
-
 	dataHashAnnotationKey = "local.storage.openshift.io/configMapDataHash"
 )
-
-var log = logf.Log.WithName(controllerName)
-
-// blank assignment to verify that DaemonReconciler implements reconcile.Reconciler
-//var _ reconcile.Reconciler = &DaemonReconciler{}
 
 // DaemonReconciler reconciles all LocalVolumeSet objects at once
 type DaemonReconciler struct {
@@ -56,7 +47,6 @@ type DaemonReconciler struct {
 	// that reads objects from the cache and writes to the apiserver
 	Client                   client.Client
 	Scheme                   *runtime.Scheme
-	Log                      logr.Logger
 	deletedStaticProvisioner bool
 }
 
@@ -66,7 +56,7 @@ type DaemonReconciler struct {
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *DaemonReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	logger := r.Log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
+	logger := log.NewDelegatingLogger(log.FromContext(ctx))
 	// do a one-time delete of the old static-provisioner daemonset
 	err := r.cleanupOldDaemonsets(ctx, request.Namespace)
 	if err != nil {
@@ -112,6 +102,7 @@ func (r *DaemonReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 
 // do a one-time delete of the old static-provisioner daemonset
 func (r *DaemonReconciler) cleanupOldDaemonsets(ctx context.Context, namespace string) error {
+	logger := log.NewDelegatingLogger(log.FromContext(ctx))
 	if r.deletedStaticProvisioner {
 		return nil
 	}
@@ -120,7 +111,7 @@ func (r *DaemonReconciler) cleanupOldDaemonsets(ctx context.Context, namespace s
 	dsList := &appsv1.DaemonSetList{}
 	err := r.Client.List(ctx, dsList, client.InNamespace(namespace))
 	if err != nil {
-		r.Log.Error(err, "could not list daemonsets")
+		logger.Error(err, "could not list daemonsets")
 		return err
 	}
 	appNameList := make([]string, 0)
@@ -134,7 +125,7 @@ func (r *DaemonReconciler) cleanupOldDaemonsets(ctx context.Context, namespace s
 			// delete daemonset
 			err = r.Client.Delete(ctx, &ds)
 			if err != nil && !(errors.IsNotFound(err) || errors.IsGone(err)) {
-				r.Log.Error(err, "could not delete daemonset: %q", ds.Name)
+				logger.Error(err, "could not delete daemonset: %q", ds.Name)
 				return err
 			}
 		}
@@ -144,14 +135,14 @@ func (r *DaemonReconciler) cleanupOldDaemonsets(ctx context.Context, namespace s
 	provisioner := &appsv1.DaemonSet{}
 	err = r.Client.Get(ctx, types.NamespacedName{Name: oldProvisionerName, Namespace: namespace}, provisioner)
 	if err == nil { // provisioner daemonset found
-		r.Log.Info(fmt.Sprintf("old daemonset %q found, cleaning up", oldProvisionerName))
+		logger.Info(fmt.Sprintf("old daemonset %q found, cleaning up", oldProvisionerName))
 		err = r.Client.Delete(ctx, provisioner)
 		if err != nil && !(errors.IsNotFound(err) || errors.IsGone(err)) {
-			r.Log.Error(err, fmt.Sprintf("could not delete daemonset %q", oldProvisionerName))
+			logger.Error(err, fmt.Sprintf("could not delete daemonset %q", oldProvisionerName))
 			return err
 		}
 	} else if !(errors.IsNotFound(err) || errors.IsGone(err)) { // unknown error
-		r.Log.Error(err, fmt.Sprintf("could not fetch daemonset %q to clean it up", oldProvisionerName))
+		logger.Error(err, fmt.Sprintf("could not fetch daemonset %q to clean it up", oldProvisionerName))
 		return err
 	}
 
@@ -169,7 +160,7 @@ func (r *DaemonReconciler) cleanupOldDaemonsets(ctx context.Context, namespace s
 		appNameList = append(appNameList, oldProvisionerName)
 		requirement, err := labels.NewRequirement(appLabelKey, selection.In, appNameList)
 		if err != nil {
-			r.Log.Error(err, "failed to compose labelselector requirement %q in (%v)", appLabelKey, appNameList)
+			logger.Error(err, "failed to compose labelselector requirement %q in (%v)", appLabelKey, appNameList)
 			return false, err
 		}
 		selector := labels.NewSelector().Add(*requirement)
@@ -179,11 +170,11 @@ func (r *DaemonReconciler) cleanupOldDaemonsets(ctx context.Context, namespace s
 		} else if len(podList.Items) == 0 {
 			allGone = true
 		}
-		r.Log.Info(fmt.Sprintf("waiting for 0 pods with label app : %q", oldProvisionerName), "numberFound", len(podList.Items))
+		logger.Info(fmt.Sprintf("waiting for 0 pods with label app : %q", oldProvisionerName), "numberFound", len(podList.Items))
 		return allGone, nil
 	})
 	if err != nil {
-		r.Log.Error(err, "could not determine that old provisioner pods were deleted")
+		logger.Error(err, "could not determine that old provisioner pods were deleted")
 		return err
 	}
 	r.deletedStaticProvisioner = true

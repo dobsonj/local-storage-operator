@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/go-logr/logr"
 	localv1 "github.com/openshift/local-storage-operator/api/v1"
 	localv1alpha1 "github.com/openshift/local-storage-operator/api/v1alpha1"
 	"github.com/openshift/local-storage-operator/common"
@@ -27,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 	provCache "sigs.k8s.io/sig-storage-local-static-provisioner/pkg/cache"
@@ -49,7 +49,7 @@ const (
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *LocalVolumeSetReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	logger := r.Log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
+	logger := log.NewDelegatingLogger(log.FromContext(ctx))
 	logger.Info("Reconciling LocalVolumeSet")
 
 	// Fetch the LocalVolumeSet instance
@@ -146,7 +146,7 @@ func (r *LocalVolumeSetReconciler) Reconcile(ctx context.Context, request ctrl.R
 	}
 
 	// find disks that match lvset filters and matchers
-	validDevices, delayedDevices := r.getValidDevices(lvset, blockDevices)
+	validDevices, delayedDevices := r.getValidDevices(ctx, lvset, blockDevices)
 
 	// update metrics for unmatched disks
 	localmetrics.SetLVSUnmatchedDiskMetric(nodeName, storageClassName, len(blockDevices)-len(validDevices))
@@ -155,7 +155,7 @@ func (r *LocalVolumeSetReconciler) Reconcile(ctx context.Context, request ctrl.R
 	var totalProvisionedPVs int
 	var noMatch []string
 	for _, blockDevice := range validDevices {
-		devLogger := logger.WithValues("Device.Name", blockDevice.Name)
+		devLogger := log.NewDelegatingLogger(logger.WithValues("Device.Name", blockDevice.Name))
 
 		symlinkSourcePath, symlinkPath, idExists, err := common.GetSymLinkSourceAndTarget(blockDevice, symLinkDir)
 		if err != nil {
@@ -239,6 +239,7 @@ func (r *LocalVolumeSetReconciler) Reconcile(ctx context.Context, request ctrl.R
 // i.e. if the device is younger than deviceMinAge
 // if the waitingDevices list is nonempty, the operator should requeueue
 func (r *LocalVolumeSetReconciler) getValidDevices(
+	ctx context.Context,
 	lvset *localv1alpha1.LocalVolumeSet,
 	blockDevices []internal.BlockDevice,
 ) ([]internal.BlockDevice, []internal.BlockDevice) {
@@ -251,18 +252,19 @@ DeviceLoop:
 		// store device in deviceAgeMap
 		r.deviceAgeMap.storeDeviceAge(blockDevice.KName)
 
-		devLogger := r.Log.WithValues("Device.Name", blockDevice.Name)
+		devLogger := log.NewDelegatingLogger(log.FromContext(ctx).WithValues("Device.Name", blockDevice.Name))
 		for name, filter := range FilterMap {
 			var valid bool
 			var err error
-			filterLogger := devLogger.WithValues("filter.Name", name)
 			valid, err = filter(blockDevice, nil)
 			if err != nil {
-				filterLogger.Error(err, "filter error")
+				devLogger.Error(err, "filter error",
+					"filter.Name", name)
 				valid = false
 				continue DeviceLoop
 			} else if !valid {
-				filterLogger.Info("filter negative")
+				devLogger.Info("filter negative",
+					"filter.Name", name)
 				continue DeviceLoop
 			}
 		}
@@ -288,14 +290,15 @@ DeviceLoop:
 		}
 
 		for name, matcher := range matcherMap {
-			matcherLogger := devLogger.WithValues("matcher.Name", name)
 			valid, err := matcher(blockDevice, lvset.Spec.DeviceInclusionSpec)
 			if err != nil {
-				matcherLogger.Error(err, "match error")
+				devLogger.Error(err, "match error",
+					"matcher.Name", name)
 				valid = false
 				continue DeviceLoop
 			} else if !valid {
-				matcherLogger.Info("match negative")
+				devLogger.Info("match negative",
+					"matcher.Name", name)
 				continue DeviceLoop
 			}
 		}
@@ -343,7 +346,7 @@ PathLoop:
 
 func (r *LocalVolumeSetReconciler) provisionPV(
 	obj *localv1alpha1.LocalVolumeSet,
-	devLogger logr.Logger,
+	devLogger *log.DelegatingLogger,
 	dev internal.BlockDevice,
 	storageClass storagev1.StorageClass,
 	mountPointMap sets.String,
@@ -456,7 +459,6 @@ type LocalVolumeSetReconciler struct {
 	// that reads objects from the cache and writes to the apiserver
 	Client        client.Client
 	Scheme        *runtime.Scheme
-	Log           logr.Logger
 	nodeName      string
 	eventReporter *eventReporter
 	// map from KNAME of device to time when the device was first observed since the process started

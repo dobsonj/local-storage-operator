@@ -9,10 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openshift/local-storage-operator/internal"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
-
 	localv1 "github.com/openshift/local-storage-operator/api/v1"
+	"github.com/openshift/local-storage-operator/internal"
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -27,6 +25,7 @@ import (
 	"k8s.io/utils/mount"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	provCache "sigs.k8s.io/sig-storage-local-static-provisioner/pkg/cache"
 	provCommon "sigs.k8s.io/sig-storage-local-static-provisioner/pkg/common"
 	provDeleter "sigs.k8s.io/sig-storage-local-static-provisioner/pkg/deleter"
@@ -34,6 +33,7 @@ import (
 )
 
 func TestFindMatchingDisk(t *testing.T) {
+	logger := log.NewDelegatingLogger(log.Log.WithName(ComponentName))
 	d, _ := getFakeDiskMaker(t, "/mnt/local-storage")
 	blockDevices := []internal.BlockDevice{
 		{
@@ -56,7 +56,7 @@ func TestFindMatchingDisk(t *testing.T) {
 		},
 	}
 	allDiskIds := getDeiveIDs()
-	deviceMap, err := d.findMatchingDisks(diskConfig, blockDevices, allDiskIds)
+	deviceMap, err := d.findMatchingDisks(diskConfig, blockDevices, allDiskIds, logger)
 	if err != nil {
 		t.Fatalf("error finding matchin device %v", err)
 	}
@@ -117,6 +117,7 @@ func TestLoadConfig(t *testing.T) {
 }
 
 func TestCreateSymLinkByDeviceID(t *testing.T) {
+	logger := log.NewDelegatingLogger(log.Log.WithName(ComponentName))
 	tmpSymLinkTargetDir := createTmpDir(t, "", "target")
 	fakeDisk := createTmpFile(t, "", "diskName")
 	fakeDiskByID := createTmpFile(t, "", "diskID")
@@ -157,13 +158,14 @@ func TestCreateSymLinkByDeviceID(t *testing.T) {
 			},
 		},
 	}
-	d.createSymlink(diskLocation, fakeDiskByID.Name(), path.Join(tmpSymLinkTargetDir, "diskID"), true)
+	d.createSymlink(diskLocation, fakeDiskByID.Name(), path.Join(tmpSymLinkTargetDir, "diskID"), true, logger)
 
 	// assert that target symlink is created for disk ID when both disk name and disk by-id are available
 	assert.Truef(t, hasFile(t, tmpSymLinkTargetDir, "diskID"), "failed to find symlink with disk ID in %s directory", tmpSymLinkTargetDir)
 }
 
 func TestCreateSymLinkByDeviceName(t *testing.T) {
+	logger := log.NewDelegatingLogger(log.Log.WithName(ComponentName))
 	tmpSymLinkTargetDir := createTmpDir(t, "", "target")
 	fakeDisk := createTmpFile(t, "", "diskName")
 	defer os.Remove(fakeDisk.Name())
@@ -187,7 +189,7 @@ func TestCreateSymLinkByDeviceName(t *testing.T) {
 
 	d, _ := getFakeDiskMaker(t, tmpSymLinkTargetDir, lv, sc)
 	diskLocation := DiskLocation{fakeDisk.Name(), "", internal.BlockDevice{}}
-	d.createSymlink(diskLocation, fakeDisk.Name(), path.Join(tmpSymLinkTargetDir, "diskName"), false)
+	d.createSymlink(diskLocation, fakeDisk.Name(), path.Join(tmpSymLinkTargetDir, "diskName"), false, logger)
 
 	// assert that target symlink is created for disk name when no disk ID is available
 	assert.Truef(t, hasFile(t, tmpSymLinkTargetDir, "diskName"), "failed to find symlink with disk name in %s directory", tmpSymLinkTargetDir)
@@ -236,7 +238,6 @@ func getFakeDiskMaker(t *testing.T, symlinkLocation string, objs ...runtime.Obje
 		symlinkLocation: symlinkLocation,
 		Client:          fakeClient,
 		Scheme:          scheme,
-		Log:             logf.Log.WithName("diskmaker-controllers-test").WithName("LocalVolume"),
 		eventSync:       fakeEventSync,
 		cleanupTracker:  cleanupTracker,
 		runtimeConfig:   runtimeConfig,

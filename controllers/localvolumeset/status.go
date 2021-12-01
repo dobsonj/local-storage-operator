@@ -13,11 +13,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 func (r *LocalVolumeSetReconciler) updateDaemonSetsCondition(ctx context.Context, request reconcile.Request) error {
+	logger := log.NewDelegatingLogger(log.FromContext(ctx))
 	var diskMakerMessage string
 	diskMakerFound := true
 	conditionType := DaemonSetsAvailableAndConfigured
@@ -55,7 +56,7 @@ func (r *LocalVolumeSetReconciler) updateDaemonSetsCondition(ctx context.Context
 	if changed {
 		err := r.Client.Status().Update(ctx, lvSet)
 		if err != nil {
-			r.Log.Error(err, "failed to update localvolumeset condition", "conditionType", conditionType, "conditionStatus", conditionStatus, "message", conditionMessage)
+			logger.Error(err, "failed to update localvolumeset condition", "conditionType", conditionType, "conditionStatus", conditionStatus, "message", conditionMessage)
 			return err
 		}
 	}
@@ -94,6 +95,7 @@ func (r *LocalVolumeSetReconciler) updateTotalProvisionedDeviceCountStatus(ctx c
 }
 
 func (r *LocalVolumeSetReconciler) addAvailabilityConditions(ctx context.Context, request reconcile.Request, result ctrl.Result, reconcileError error) (ctrl.Result, error) {
+	logger := log.NewDelegatingLogger(log.FromContext(ctx))
 	// can't set conditions if lvset can't be fetched
 	lvSet := &localv1alpha1.LocalVolumeSet{}
 	err := r.Client.Get(ctx, request.NamespacedName, lvSet)
@@ -112,7 +114,7 @@ func (r *LocalVolumeSetReconciler) addAvailabilityConditions(ctx context.Context
 
 	// failure values
 	if reconcileError != nil {
-		r.Log.Error(reconcileError, "reconcile error")
+		logger.Error(reconcileError, "reconcile error")
 		conditionStatus = operatorv1.ConditionFalse
 		conditionMessage = fmt.Sprintf("Operator error: %+v", reconcileError)
 	}
@@ -120,7 +122,7 @@ func (r *LocalVolumeSetReconciler) addAvailabilityConditions(ctx context.Context
 	if changed {
 		err := r.Client.Status().Update(context.TODO(), lvSet)
 		if err != nil {
-			r.Log.Error(err, "failed to update localvolumeset condition", "conditionType", conditionType, "conditionStatus", conditionStatus, "message", conditionMessage)
+			logger.Error(err, "failed to update localvolumeset condition", "conditionType", conditionType, "conditionStatus", conditionStatus, "message", conditionMessage)
 			return result, err
 		}
 	}

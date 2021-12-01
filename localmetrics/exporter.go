@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	k8sYAML "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type Exporter struct {
@@ -96,9 +96,10 @@ func (e *Exporter) enableServiceMonitor() error {
 // createOrUpdateService creates service object or an error
 func (e *Exporter) createOrUpdateService(service *corev1.Service) (*corev1.Service, error) {
 	namespacedName := types.NamespacedName{Namespace: service.GetNamespace(), Name: service.GetName()}
-	log := logf.Log.WithName("metrics-exporter")
-	log.WithValues("service.namespace", service.GetNamespace(), "service.name", service.GetName())
-	log.Info("Reconciling metrics exporter service")
+	logger := log.NewDelegatingLogger(log.FromContext(e.Ctx))
+	logger.Info("Reconciling metrics exporter service",
+		"service.namespace", service.GetNamespace(),
+		"service.name", service.GetName())
 
 	oldService := &corev1.Service{}
 	err := e.Client.Get(e.Ctx, namespacedName, oldService)
@@ -124,15 +125,16 @@ func (e *Exporter) createOrUpdateService(service *corev1.Service) (*corev1.Servi
 // createOrUpdateServiceMonitor creates serviceMonitor object or an error
 func (e *Exporter) createOrUpdateServiceMonitor(serviceMonitor *monitoringv1.ServiceMonitor) (*monitoringv1.ServiceMonitor, error) {
 	namespacedName := types.NamespacedName{Name: serviceMonitor.Name, Namespace: serviceMonitor.Namespace}
-	log := logf.Log.WithName("service-monitor")
-	log.WithValues("service-monitor.namespace", serviceMonitor.GetNamespace(), "serviceMonitor.name", serviceMonitor.GetName())
-	log.Info("creating service monitor")
+	logger := log.NewDelegatingLogger(log.FromContext(e.Ctx))
+	logger.Info("Reconciling metrics exporter service monitor",
+		"serviceMonitor.namespace", serviceMonitor.GetNamespace(),
+		"serviceMonitor.name", serviceMonitor.GetName())
 
 	oldSm := &monitoringv1.ServiceMonitor{}
-	err := e.Client.Get(context.TODO(), namespacedName, oldSm)
+	err := e.Client.Get(e.Ctx, namespacedName, oldSm)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			err = e.Client.Create(context.TODO(), serviceMonitor)
+			err = e.Client.Create(e.Ctx, serviceMonitor)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get servicemonitor %v. %v", namespacedName, err)
 			}
@@ -141,7 +143,7 @@ func (e *Exporter) createOrUpdateServiceMonitor(serviceMonitor *monitoringv1.Ser
 		return nil, fmt.Errorf("failed to retrieve servicemonitor %v. %v", namespacedName, err)
 	}
 	oldSm.Spec = serviceMonitor.Spec
-	err = e.Client.Update(context.TODO(), oldSm)
+	err = e.Client.Update(e.Ctx, oldSm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update servicemonitor %v. %v", namespacedName, err)
 	}

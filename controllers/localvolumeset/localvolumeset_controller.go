@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-logr/logr"
 	"github.com/openshift/local-storage-operator/common"
 	"github.com/openshift/local-storage-operator/controllers/nodedaemon"
 	appsv1 "k8s.io/api/apps/v1"
@@ -34,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -53,7 +53,6 @@ type LocalVolumeSetReconciler struct {
 	// that reads objects from the cache and writes to the apiserver
 	Client   client.Client
 	Scheme   *runtime.Scheme
-	Log      logr.Logger
 	LvSetMap *common.StorageClassOwnerMap
 }
 
@@ -69,8 +68,8 @@ func (r *LocalVolumeSetReconciler) Reconcile(ctx context.Context, request ctrl.R
 }
 
 func (r *LocalVolumeSetReconciler) reconcile(ctx context.Context, request reconcile.Request) (ctrl.Result, error) {
-	volumeSetLogger := r.Log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
-	volumeSetLogger.Info("Reconciling LocalVolumeSet")
+	logger := log.NewDelegatingLogger(log.FromContext(ctx))
+	logger.Info("Reconciling LocalVolumeSet")
 	// Fetch the LocalVolumeSet instance
 	lvSet := &localv1alpha1.LocalVolumeSet{}
 	err := r.Client.Get(ctx, request.NamespacedName, lvSet)
@@ -83,7 +82,7 @@ func (r *LocalVolumeSetReconciler) reconcile(ctx context.Context, request reconc
 			return ctrl.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
-		volumeSetLogger.Error(err, "failed to get localvolumeset")
+		logger.Error(err, "failed to get localvolumeset")
 		return ctrl.Result{}, err
 	}
 
@@ -91,7 +90,7 @@ func (r *LocalVolumeSetReconciler) reconcile(ctx context.Context, request reconc
 	r.LvSetMap.RegisterStorageClassOwner(lvSet.Spec.StorageClassName, request.NamespacedName)
 
 	// handle the LocalVolumeSet finalizer
-	err = r.syncFinalizer(*lvSet)
+	err = r.syncFinalizer(ctx, *lvSet)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to update localvolumeset finalizer: %w", err)
 	}
@@ -101,20 +100,20 @@ func (r *LocalVolumeSetReconciler) reconcile(ctx context.Context, request reconc
 
 	err = r.syncStorageClass(ctx, lvSet)
 	if err != nil {
-		volumeSetLogger.Error(err, "failed to sync storageclass")
+		logger.Error(err, "failed to sync storageclass")
 		return ctrl.Result{}, err
 	}
-	volumeSetLogger.Info("updating status")
+	logger.Info("updating status")
 
 	err = r.updateDaemonSetsCondition(ctx, request)
 	if err != nil {
-		volumeSetLogger.Error(err, "failed to update status")
+		logger.Error(err, "failed to update status")
 		return ctrl.Result{}, err
 	}
 
 	err = r.updateTotalProvisionedDeviceCountStatus(ctx, request)
 	if err != nil {
-		volumeSetLogger.Error(err, "failed to update status")
+		logger.Error(err, "failed to update status")
 		return ctrl.Result{}, err
 	}
 

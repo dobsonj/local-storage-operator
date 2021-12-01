@@ -13,9 +13,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	provCommon "sigs.k8s.io/sig-storage-local-static-provisioner/pkg/common"
 	provDeleter "sigs.k8s.io/sig-storage-local-static-provisioner/pkg/deleter"
@@ -61,7 +61,7 @@ func CreateLocalPV(
 
 	pvName := GeneratePVName(filepath.Base(symLinkPath), runtimeConfig.Node.Name, storageClass.Name)
 
-	pvLogger := devLogger.WithValues("pv.Name", pvName)
+	pvLogger := log.NewDelegatingLogger(devLogger.WithValues("pv.Name", pvName))
 
 	nodeAffinity := &corev1.VolumeNodeAffinity{
 		Required: &corev1.NodeSelector{
@@ -110,8 +110,10 @@ func CreateLocalPV(
 			return fmt.Errorf("could not read device capacity: %w", err)
 		}
 		if desiredVolumeMode == corev1.PersistentVolumeBlock && len(storageClass.MountOptions) != 0 {
-			klog.Warningf("Path %q will be used to create block volume, "+
-				"mount options %v will not take effect.", symLinkPath, storageClass.MountOptions)
+			pvLogger.Info("Path is being used to create a block volume, "+
+				"mount options will not take effect.",
+				"path", symLinkPath,
+				"mount_opts", storageClass.MountOptions)
 		}
 	case corev1.PersistentVolumeFilesystem:
 		if desiredVolumeMode == corev1.PersistentVolumeBlock {
@@ -162,7 +164,7 @@ func CreateLocalPV(
 
 	var reclaimPolicy corev1.PersistentVolumeReclaimPolicy
 	if storageClass.ReclaimPolicy == nil {
-		devLogger.Error(fmt.Errorf("no ReclaimPolicy set in storageclass"), "defaulting to delete")
+		pvLogger.Error(fmt.Errorf("no ReclaimPolicy set in storageclass"), "defaulting to delete")
 		reclaimPolicy = corev1.PersistentVolumeReclaimDelete
 	} else {
 		reclaimPolicy = *storageClass.ReclaimPolicy

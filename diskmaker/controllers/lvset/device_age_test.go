@@ -1,6 +1,7 @@
 package lvset
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -66,7 +67,7 @@ func TestDeviceAge(t *testing.T) {
 			blockDevices = append(blockDevices, internal.BlockDevice{KName: fmt.Sprintf("dev-%d", len(blockDevices))})
 		}
 
-		validDevices, delayedDevices := r.getValidDevices(nil, blockDevices)
+		validDevices, delayedDevices := r.getValidDevices(context.TODO(), nil, blockDevices)
 		assert.Lenf(t, validDevices, expectedValid[run], "validDevices")
 		assert.Lenf(t, delayedDevices, len(blockDevices)-expectedValid[run], "delayedDevices")
 

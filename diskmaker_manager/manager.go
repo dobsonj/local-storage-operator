@@ -11,7 +11,6 @@ import (
 	diskmakerControllerLvSet "github.com/openshift/local-storage-operator/diskmaker/controllers/lvset"
 	"github.com/openshift/local-storage-operator/localmetrics"
 	"github.com/pkg/errors"
-	"github.com/prometheus/common/log"
 	"github.com/spf13/cobra"
 	zaplog "go.uber.org/zap"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
@@ -41,7 +40,7 @@ func startManager(cmd *cobra.Command, args []string) error {
 	klogFlags := flag.NewFlagSet("local-storage-diskmaker", flag.ExitOnError)
 	klog.InitFlags(klogFlags)
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 		ZapOpts:     []zaplog.Option{zaplog.AddCaller()},
 	}
 	opts.BindFlags(flag.CommandLine)
@@ -62,7 +61,7 @@ func startManager(cmd *cobra.Command, args []string) error {
 
 	namespace, err := common.GetWatchNamespace()
 	if err != nil {
-		log.Error(err, "Failed to get watch namespace")
+		setupLog.Error(err, "Failed to get watch namespace")
 		return err
 	}
 
@@ -73,14 +72,13 @@ func startManager(cmd *cobra.Command, args []string) error {
 		LeaderElection:     false,
 	})
 	if err != nil {
-		setupLog.Error(err, "")
+		setupLog.Error(err, "failed to create new controller manager")
 		return err
 	}
 
 	if err = (&diskmakerControllerLv.LocalVolumeReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-		Log:    ctrl.Log.WithName("diskmaker-controllers").WithName("LocalVolume"),
 	}).SetupWithManager(mgr, &provDeleter.CleanupStatusTracker{ProcTable: provDeleter.NewProcTable()}, provCache.NewVolumeCache()); err != nil {
 		setupLog.Error(err, "unable to create diskmaker controller", "controller", "LocalVolume")
 		return err
@@ -89,7 +87,6 @@ func startManager(cmd *cobra.Command, args []string) error {
 	if err = (&diskmakerControllerLvSet.LocalVolumeSetReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-		Log:    ctrl.Log.WithName("diskmaker-controllers").WithName("LocalVolumeSet"),
 	}).SetupWithManager(mgr, &provDeleter.CleanupStatusTracker{ProcTable: provDeleter.NewProcTable()}, provCache.NewVolumeCache()); err != nil {
 		setupLog.Error(err, "unable to create diskmaker controller", "controller", "LocalVolumeSet")
 		return err
@@ -98,7 +95,6 @@ func startManager(cmd *cobra.Command, args []string) error {
 	if err = (&diskmakerControllerDeleter.DeleteReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-		Log:    ctrl.Log.WithName("diskmaker-controllers").WithName("Deleter"),
 	}).SetupWithManager(mgr, &provDeleter.CleanupStatusTracker{ProcTable: provDeleter.NewProcTable()}, provCache.NewVolumeCache()); err != nil {
 		setupLog.Error(err, "unable to create diskmaker controller", "controller", "Deleter")
 		return err
@@ -115,7 +111,7 @@ func startManager(cmd *cobra.Command, args []string) error {
 	// Start the Cmd
 	stopChan := signals.SetupSignalHandler()
 	if err := mgr.Start(stopChan); err != nil {
-		log.Error(err, "manager exited non-zero")
+		setupLog.Error(err, "manager exited non-zero")
 		return err
 	}
 	return nil
