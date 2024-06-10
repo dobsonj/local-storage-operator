@@ -1,0 +1,25 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: local-storage-operator-metrics
+  namespace: openshift-local-storage
+  labels:
+    app: local-storage-operator
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: local-storage-operator-serving-cert
+spec:
+  namespaceSelector:
+    matchNames:
+      - openshift-local-storage
+  selector:
+    matchLabels:
+      app: local-storage-operator
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 1m
+    scheme: https
+    bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    tlsConfig:
+      caFile: /etc/prometheus/configmaps/serving-certs-ca-bundle/service-ca.crt
+      serverName: local-storage-operator-metrics.openshift-local-storage.svc
